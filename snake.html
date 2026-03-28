@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Snake (Picture Style)</title>
+  <style>
+    body{
+      margin:0;
+      background:#0b0f14;
+      color:#e9eef7;
+      font-family: Arial, sans-serif;
+      display:grid;
+      place-items:center;
+      min-height:100vh;
+      padding:16px;
+    }
+    .wrap{ width:min(520px, 100%); text-align:center; }
+    .hud{ display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin:10px 0; }
+    .pill{ background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:999px; padding:8px 12px; font-weight:800; }
+    .controls{ display:flex; gap:10px; justify-content:center; margin:10px 0 14px; }
+    button{ cursor:pointer; background:rgba(255,255,255,0.08); color:#e9eef7; border:1px solid rgba(255,255,255,0.16); border-radius:12px; padding:10px 14px; font-weight:900; }
+    button:disabled{ opacity:0.55; cursor:not-allowed; }
+
+    .stage{ position:relative; width:100%; display:grid; place-items:center; gap:12px; }
+    canvas{
+      width:420px; height:420px;
+      background:#a8d86b;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,0.14);
+      box-shadow: 0 22px 60px rgba(0,0,0,0.45);
+      touch-action:none;
+      user-select:none;
+    }
+
+    .overlay{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; }
+    .overlay.hidden{ display:none; }
+    .box{ background:rgba(0,0,0,0.45); border:1px solid rgba(255,255,255,0.2); border-radius:16px; padding:16px 18px; width:min(360px, 100%); }
+    .box h2{ margin:0 0 6px; }
+    .box p{ margin:0; opacity:0.85; }
+
+    .pad{
+      display:grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-rows: 1fr 1fr 1fr;
+      gap:10px;
+      width:240px;
+      margin:0 auto;
+    }
+    .pad button{ width:72px; height:72px; border-radius:18px; font-size:18px; }
+    .up{ grid-column:2; grid-row:1; }
+    .left{ grid-column:1; grid-row:2; }
+    .right{ grid-column:3; grid-row:2; }
+    .down{ grid-column:2; grid-row:3; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div style="font-weight:900; font-size:20px;">Snake</div>
+
+    <div class="hud">
+      <div class="pill">Score: <span id="score">0</span></div>
+      <div class="pill">Speed: <span id="speed">1.0x</span></div>
+    </div>
+
+    <div class="controls">
+      <button id="startBtn">Start</button>
+      <button id="restartBtn" disabled>Restart</button>
+    </div>
+
+    <div class="stage">
+      <canvas id="game" width="420" height="420"></canvas>
+
+      <div id="overlay" class="overlay">
+        <div class="box">
+          <h2 id="overlayTitle">Snake</h2>
+          <p id="overlayText">Press Start (Arrow keys or D-pad)</p>
+        </div>
+      </div>
+
+      <div class="pad" aria-label="controls">
+        <button id="btnUp" class="up">▲</button>
+        <button id="btnLeft" class="left">◀</button>
+        <button id="btnRight" class="right">▶</button>
+        <button id="btnDown" class="down">▼</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  const scoreEl = document.getElementById("score");
+  const speedEl = document.getElementById("speed");
+  const startBtn = document.getElementById("startBtn");
+  const restartBtn = document.getElementById("restartBtn");
+  const overlay = document.getElementById("overlay");
+  const overlayTitle = document.getElementById("overlayTitle");
+  const overlayText = document.getElementById("overlayText");
+
+  const gridSize = 20;                 // cell size
+  const tiles = canvas.width / gridSize;
+
+  // “like the picture”
+  const BOARD_A = "#9fd260";           // light green
+  const BOARD_B = "#8cc650";           // dark green
+  const SNAKE = "#6b78ff";             // bluish purple
+  const APPLE = "#ff2a2a";             // red
+  const SNAKE_OUTLINE = "rgba(0,0,0,0.12)";
+
+  const baseStepMs = 135;
+  const minStepMs = 60;
+  const stepDown = 8;
+
+  let snake, dir, nextDir, apple, score, stepMs, state;
+  let last = 0, acc = 0, raf = 0;
+
+  function reset(){
+    snake = [{x: 5, y: 5},{x:4,y:5},{x:3,y:5}];
+    dir = {x:1,y:0};
+    nextDir = {x:1,y:0};
+    score = 0;
+    stepMs = baseStepMs;
+    state = "idle";
+    apple = spawnApple();
+    scoreEl.textContent = String(score);
+    updateSpeed();
+    draw();
+  }
+
+  function updateSpeed(){
+    speedEl.textContent = (baseStepMs/stepMs).toFixed(1) + "x";
+  }
+
+  function spawnApple(){
+    let p;
+    do{
+      p = { x: Math.floor(Math.random()*tiles), y: Math.floor(Math.random()*tiles) };
+    }while(snake.some(s => s.x===p.x && s.y===p.y));
+    return p;
+  }
+
+  function trySet(d){
+    if (d.x === -dir.x && d.y === -dir.y) return; // no reverse
+    nextDir = d;
+  }
+
+  function drawBoard(){
+    for(let y=0;y<tiles;y++){
+      for(let x=0;x<tiles;x++){
+        ctx.fillStyle = ((x+y)&1) ? BOARD_B : BOARD_A;
+        ctx.fillRect(x*gridSize, y*gridSize, gridSize, gridSize);
+      }
+    }
+  }
+
+  // Thick “tube” look by drawing rounded rectangles.
+  function roundRect(x,y,w,h,r){
+    const rr = Math.min(r,w/2,h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+rr,y);
+    ctx.arcTo(x+w,y,x+w,y+h,rr);
+    ctx.arcTo(x+w,y+h,x,y+h,rr);
+    ctx.arcTo(x,y+h,x,y,rr);
+    ctx.arcTo(x,y,x+w,y,rr);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawSnake(){
+    snake.forEach((s, i) => {
+      const px = s.x*gridSize;
+      const py = s.y*gridSize;
+      const pad = 2;                 // makes it “thicker”
+      const x = px + pad;
+      const y = py + pad;
+      const w = gridSize - pad*2;
+      const h = gridSize - pad*2;
+
+      // small outline
+      ctx.fillStyle = SNAKE_OUTLINE;
+      roundRect(x-1, y-1, w+2, h+2, 8);
+
+      ctx.fillStyle = SNAKE;
+      roundRect(x, y, w, h, 8);
+
+      // head dot (tiny highlight) like a “face”
+      if (i === 0){
+        ctx.fillStyle = "rgba(255,255,255,0.25)";
+        ctx.beginPath();
+        ctx.arc(px + gridSize*0.65, py + gridSize*0.38, 2.2, 0, Math.PI*2);
+        ctx.fill();
+      }
+    });
+  }
+
+  function drawApple(){
+    const px = apple.x*gridSize;
+    const py = apple.y*gridSize;
+    ctx.fillStyle = APPLE;
+    ctx.beginPath();
+    ctx.arc(px + gridSize/2, py + gridSize/2, gridSize*0.28, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  function draw(){
+    drawBoard();
+    drawApple();
+    drawSnake();
+  }
+
+  function gameOver(){
+    state = "over";
+    overlayTitle.textContent = "Game Over";
+    overlayText.textContent = "Press Restart";
+    overlay.classList.remove("hidden");
+    startBtn.disabled = true;
+    restartBtn.disabled = false;
+    cancelAnimationFrame(raf);
+    raf = 0;
+  }
+
+  function step(){
+    if (state !== "running") return;
+    dir = nextDir;
+
+    const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+
+    if (head.x<0 || head.x>=tiles || head.y<0 || head.y>=tiles) return gameOver();
+    if (snake.some(s => s.x===head.x && s.y===head.y)) return gameOver();
+
+    snake.unshift(head);
+
+    if (head.x===apple.x && head.y===apple.y){
+      score++;
+      scoreEl.textContent = String(score);
+      apple = spawnApple();
+      stepMs = Math.max(minStepMs, stepMs - stepDown);
+      updateSpeed();
+    } else {
+      snake.pop();
+    }
+  }
+
+  function loop(t){
+    if (state !== "running") return;
+    if (!last) last = t;
+    acc += (t - last);
+    last = t;
+
+    while(acc >= stepMs){
+      step();
+      acc -= stepMs;
+      if (state !== "running") break;
+    }
+    draw();
+    raf = requestAnimationFrame(loop);
+  }
+
+  function start(){
+    snake = [{x: 5, y: 5},{x:4,y:5},{x:3,y:5}];
+    dir = {x:1,y:0};
+    nextDir = {x:1,y:0};
+    score = 0;
+    stepMs = baseStepMs;
+    apple = spawnApple();
+    scoreEl.textContent = "0";
+    updateSpeed();
+
+    state = "running";
+    overlay.classList.add("hidden");
+    startBtn.disabled = true;
+    restartBtn.disabled = true;
+
+    last = 0;
+    acc = 0;
+    draw();
+    raf = requestAnimationFrame(loop);
+  }
+
+  startBtn.addEventListener("click", start);
+  restartBtn.addEventListener("click", start);
+
+  document.addEventListener("keydown", (e) => {
+    if (state !== "running") return;
+    if (e.key === "ArrowUp") trySet({x:0,y:-1});
+    if (e.key === "ArrowDown") trySet({x:0,y:1});
+    if (e.key === "ArrowLeft") trySet({x:-1,y:0});
+    if (e.key === "ArrowRight") trySet({x:1,y:0});
+  });
+
+  // D-pad (mouse clickable)
+  document.getElementById("btnUp").addEventListener("click", () => trySet({x:0,y:-1}));
+  document.getElementById("btnDown").addEventListener("click", () => trySet({x:0,y:1}));
+  document.getElementById("btnLeft").addEventListener("click", () => trySet({x:-1,y:0}));
+  document.getElementById("btnRight").addEventListener("click", () => trySet({x:1,y:0}));
+
+  reset();
+</script>
+</body>
+</html>
+<script>
+  // ...
+  document.addEventListener("keydown", (e) => {
+    if (state !== "running") return;
+    if (e.key === "ArrowUp") trySet({x:0,y:-1});
+    if (e.key === "ArrowDown") trySet({x:0,y:1});
+    if (e.key === "ArrowLeft") trySet({x:-1,y:0});
+    if (e.key === "ArrowRight") trySet({x:1,y:0});
+  });
+  // ...
+</script>
+<script>
+  // ...
+  document.addEventListener("keydown", (e) => {
+    if (state !== "running") return;
+
+    const k = e.key.toLowerCase();
+
+    if (k === "arrowup" || k === "w") trySet({x:0,y:-1});
+    if (k === "arrowdown" || k === "s") trySet({x:0,y:1});
+    if (k === "arrowleft" || k === "a") trySet({x:-1,y:0});
+    if (k === "arrowright" || k === "d") trySet({x:1,y:0});
+  });
+  // ...
+</script> 
